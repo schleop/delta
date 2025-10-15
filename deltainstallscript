@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         delta
 // @namespace    delta.local
-// @version      0.9.2
-// @description  Draggable panel (F8). Tabs with horizontal scroll; Visual layout fixed. Emoji debug, Snapshots, and custom code tabs.
+// @version      0.9.0
+// @description  Black rounded UI with tabs (F8). Visual: emoji debug + full emoji dropdown. Snapshots: capture scaled PNGs with preview. + tab creates custom code tabs you can rename and inject (JS/CSS).
 // @match        *://*/*
 // @run-at       document-end
 // @grant        GM_xmlhttpRequest
@@ -67,7 +67,7 @@
   let lightbox, lightboxImg;
 
   // Tabs UI refs
-  let tabsLeft, tabsLeftBase, tabsLeftCodes, tabsRight, contentEl;
+  let tabsLeftBase, tabsLeftCodes, tabsRight, contentEl;
   let tabVisualBtn, tabShotsBtn, plusBtn;
   let pageVisual, pageShots;
   const codeTabButtons = new Map(); // id -> button
@@ -78,8 +78,14 @@
   let codeTabs = loadCodeTabs();
   const uid = () => 't' + Math.random().toString(36).slice(2, 10);
 
+  // Style helper
+  function addStyle(css) {
+    if (typeof GM_addStyle === 'function') GM_addStyle(css);
+    else { const s = document.createElement('style'); s.textContent = css; document.head.appendChild(s); }
+  }
+
   // Styles
-  GM_addStyle(`
+  addStyle(`
     /* Panel */
     #${BOX_ID} {
       position: fixed; top: 60px; left: 60px; width: 360px;
@@ -92,36 +98,22 @@
       color: #f5f5f7; cursor: move; border-top-left-radius: 12px; border-top-right-radius: 12px;
       font-weight: 600; letter-spacing: 0.2px;
     }
-
-    /* Tabs bar with horizontal scroll on the left side */
     #${BOX_ID} .tabs {
-      display: flex; align-items: flex-end; justify-content: flex-start; gap: 6px;
-      padding: 8px 10px 0; border-bottom: 1px solid #1f1f22; box-sizing: border-box;
+      display: flex; align-items: center; justify-content: space-between; gap: 6px;
+      padding: 8px 10px 0; border-bottom: 1px solid #1f1f22;
     }
-    #${BOX_ID} .tabs-left {
-      flex: 1 1 auto; min-width: 0;
-      display: flex; flex-wrap: nowrap; gap: 6px;
-      overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch;
-    }
-    #${BOX_ID} .tabs-left::-webkit-scrollbar { height: 8px; }
-    #${BOX_ID} .tabs-left::-webkit-scrollbar-track { background: #0f0f10; }
-    #${BOX_ID} .tabs-left::-webkit-scrollbar-thumb { background: #2c2c31; border-radius: 8px; border: 2px solid #0f0f10; }
-    #${BOX_ID} .tabs-left-base, #${BOX_ID} .tabs-left-codes {
-      display: flex; flex-wrap: nowrap; gap: 6px;
-    }
-    #${BOX_ID} .tabs-right { flex: 0 0 auto; }
-
+    #${BOX_ID} .tabs-left { display: flex; gap: 6px; flex-wrap: wrap; }
+    #${BOX_ID} .tabs-left-base { display: flex; gap: 6px; }
+    #${BOX_ID} .tabs-left-codes { display: flex; gap: 6px; flex-wrap: wrap; }
+    #${BOX_ID} .tabs-right { margin-left: auto; }
     #${BOX_ID} .tab {
-      flex: 0 0 auto;
       padding: 6px 10px; border-radius: 8px 8px 0 0; background: #131316; color: #cfcfd4;
-      cursor: pointer; border: 1px solid #1f1f22; border-bottom: none; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      cursor: pointer; border: 1px solid #1f1f22; border-bottom: none; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     #${BOX_ID} .tab[aria-selected="true"] { background: #1a1a1f; color: #fff; }
     #${BOX_ID} .tab.plus { width: 34px; text-align: center; font-weight: 700; }
-
-    /* Content and pages (fix Visual alignment) */
-    #${BOX_ID} .content { padding: 10px; user-select: auto; cursor: default; text-align: left; }
-    #${BOX_ID} .page { display: none; margin: 0; }
+    #${BOX_ID} .content { padding: 10px; user-select: auto; cursor: default; }
+    #${BOX_ID} .page { display: none; }
     #${BOX_ID} .page.active { display: block; }
 
     #${BOX_ID} label { display: flex; gap: 8px; align-items: center; }
@@ -181,7 +173,9 @@
       position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 2147483647; display: none;
       align-items: center; justify-content: center; cursor: zoom-out;
     }
-    #${LIGHTBOX_ID} img { max-width: 92vw; max-height: 92vh; border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,0.6); }
+    #${LIGHTBOX_ID} img {
+      max-width: 92vw; max-height: 92vh; border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,0.6);
+    }
   `);
 
   // IME guard
@@ -232,8 +226,11 @@
   }
 
   // Emoji dataset
-  const slug = (s) => String(s || '').toLowerCase().replace(/['’]+/g, '').replace(/[^a-z0-9+\-_ ]+/g, ' ').trim().replace(/\s+/g, '_');
-  const splitTerms = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9+\-_ ]+/g, ' ').split(/\s+/).filter(Boolean);
+  const slug = (s) => String(s || '')
+    .toLowerCase().replace(/['’]+/g, '').replace(/[^a-z0-9+\-_ ]+/g, ' ').trim().replace(/\s+/g, '_');
+
+  const splitTerms = (s) => String(s || '')
+    .toLowerCase().replace(/[^a-z0-9+\-_ ]+/g, ' ').split(/\s+/).filter(Boolean);
 
   async function loadEmojiData() {
     if (emojiLoaded || emojiLoading) return;
@@ -274,8 +271,7 @@
 
       for (const e of data) {
         if (e.emoji && e.hexcode) pushEntry(e.emoji, e.hexcode, e.annotation || e.label || '', e.tags || e.keywords || []);
-        if (Array.isArray(e.skins)) for (const s of e.skins) if (s.emoji && s.hexcode)
-          pushEntry(s.emoji, s.hexcode, s.annotation || s.label || e.annotation || '', s.tags || s.keywords || e.tags || []);
+        if (Array.isArray(e.skins)) for (const s of e.skins) if (s.emoji && s.hexcode) pushEntry(s.emoji, s.hexcode, s.annotation || s.label || e.annotation || '', s.tags || s.keywords || e.tags || []);
       }
 
       for (const k in FALLBACK_MAP) if (!map[k]) { map[k] = FALLBACK_MAP[k]; entries.push({ emoji: FALLBACK_MAP[k], primary: k, names: [k], terms: [k], order: order++ }); }
@@ -292,7 +288,9 @@
       emojiMap = { ...FALLBACK_MAP };
       emojiEntries = Object.keys(FALLBACK_MAP).map((k, i) => ({ emoji: FALLBACK_MAP[k], primary: k, names: [k], terms: [k], order: i }));
       emojiLoaded = true;
-    } finally { emojiLoading = false; }
+    } finally {
+      emojiLoading = false;
+    }
   }
   function getEmoji(code) {
     if (!code) return null;
@@ -301,75 +299,16 @@
     return FALLBACK_MAP[code] || null;
   }
 
-  // Emoji dropdown
-  function ensureDropdown() {
-    if (dd) return dd;
-    dd = document.createElement('div'); dd.id = DROPDOWN_ID;
-    ddList = document.createElement('div'); ddList.className = 'list';
-    dd.appendChild(ddList); document.body.appendChild(dd);
-    return dd;
-  }
-  function renderDropdown(items, anchor) {
-    ensureDropdown();
-    ddItems = items; ddList.innerHTML = '';
-    if (!items.length) { closeDropdown(); return; }
-
-    const frag = document.createDocumentFragment();
-    items.forEach((it, idx) => {
-      const row = document.createElement('div');
-      row.className = 'row'; row.dataset.idx = String(idx);
-      const emo = document.createElement('span'); emo.className = 'emo'; emo.textContent = it.emoji;
-      const name = document.createElement('span'); name.className = 'name'; name.textContent = `:${it.primary}:`;
-      const hint = document.createElement('span'); hint.className = 'hint';
-      if (it.names.length > 1) hint.textContent = `+${it.names.length - 1} alias`;
-      row.appendChild(emo); row.appendChild(name); row.appendChild(hint);
-      row.addEventListener('mouseenter', () => setActiveIndex(idx));
-      row.addEventListener('mousedown', (ev) => { ev.preventDefault(); pickActive(); });
-      frag.appendChild(row);
-    });
-    ddList.appendChild(frag);
-
-    // Position: flip up if needed, clamp to viewport
-    dd.style.visibility = 'hidden';
-    dd.style.display = 'block';
-    dd.style.left = '0px';
-    dd.style.top = '0px';
-    const gap = 8, vw = window.innerWidth, vh = window.innerHeight;
-    const rect = dd.getBoundingClientRect();
-    const width = rect.width, height = rect.height;
-    let left = Math.round(anchor.left);
-    if (left + width + gap > vw) left = Math.max(gap, vw - width - gap);
-    if (left < gap) left = gap;
-    let top = Math.round(anchor.topBelow);
-    if (top + height + gap > vh && anchor.topAbove != null) {
-      top = Math.round(anchor.topAbove - height);
-      if (top < gap) top = gap;
-    }
-    if (top + height + gap > vh) top = Math.max(gap, vh - height - gap);
-    dd.style.left = left + 'px'; dd.style.top = top + 'px'; dd.style.visibility = 'visible';
-    ddOpen = true; setActiveIndex(0);
-  }
-  function setActiveIndex(i) {
-    ddIndex = Math.max(0, Math.min(i, ddItems.length - 1));
-    const rows = ddList.querySelectorAll('.row');
-    rows.forEach((r, idx) => r.classList.toggle('active', idx === ddIndex));
-  }
-  function closeDropdown() {
-    ddOpen = false;
-    if (dd) { dd.style.display = 'none'; ddList && (ddList.innerHTML = ''); }
-    ddItems = []; ddIndex = 0; ddAnchor = null;
-  }
-
+  // Emoji query + dropdown
   function findQueryInInput(el) {
     if (!(el && el.selectionStart != null && el.selectionEnd != null)) return null;
     if (el.selectionStart !== el.selectionEnd) return null;
     const pos = el.selectionStart; const left = (el.value || '').slice(0, pos);
-    const m = left.match(/:([a-z0-9_+\-]{1,48})$/i);
-    if (!m) return null;
+    const m = left.match(/:([a-z0-9_+\-]{1,48})$/i); if (!m) return null;
     return { type: 'input', el, start: pos - (m[1].length + 1), end: pos, query: m[1] };
   }
   function findQueryInCE(el) {
-    const sel = el.ownerDocument.getSelection(); if (!sel || !sel.rangeCount === 0) return null;
+    const sel = el.ownerDocument.getSelection(); if (!sel || sel.rangeCount === 0) return null;
     const rng = sel.getRangeAt(0); if (!el.contains(rng.startContainer) || !rng.collapsed) return null;
 
     let node = rng.startContainer, offset = rng.startOffset;
@@ -377,8 +316,7 @@
       const walker = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
       let last = null;
       while (walker.nextNode()) {
-        const n = walker.currentNode;
-        const r = document.createRange(); r.selectNodeContents(n);
+        const n = walker.currentNode; const r = document.createRange(); r.selectNodeContents(n);
         if (r.comparePoint(rng.startContainer, rng.startOffset) <= 0) last = n; else break;
       }
       if (!last) return null; node = last; offset = node.nodeValue.length;
@@ -420,6 +358,58 @@
     }
     return best - e.order / 10000;
   }
+
+  function ensureDropdown() {
+    if (dd) return dd;
+    dd = document.createElement('div'); dd.id = DROPDOWN_ID;
+    ddList = document.createElement('div'); ddList.className = 'list';
+    dd.appendChild(ddList); document.body.appendChild(dd);
+    return dd;
+  }
+  function renderDropdown(items, anchor) {
+    ensureDropdown();
+    ddItems = items; ddList.innerHTML = '';
+    if (!items.length) { closeDropdown(); return; }
+
+    const frag = document.createDocumentFragment();
+    items.forEach((it, idx) => {
+      const row = document.createElement('div'); row.className = 'row'; row.dataset.idx = String(idx);
+      const emo = document.createElement('span'); emo.className = 'emo'; emo.textContent = it.emoji;
+      const name = document.createElement('span'); name.className = 'name'; name.textContent = `:${it.primary}:`;
+      const hint = document.createElement('span'); hint.className = 'hint';
+      if (it.names.length > 1) hint.textContent = `+${it.names.length - 1} alias`;
+      row.appendChild(emo); row.appendChild(name); row.appendChild(hint);
+      row.addEventListener('mouseenter', () => setActiveIndex(idx));
+      row.addEventListener('mousedown', (ev) => { ev.preventDefault(); pickActive(); });
+      frag.appendChild(row);
+    });
+    ddList.appendChild(frag);
+
+    dd.style.visibility = 'hidden'; dd.style.display = 'block'; dd.style.left = '0px'; dd.style.top = '0px';
+
+    const gap = 8, vw = window.innerWidth, vh = window.innerHeight;
+    const rect = dd.getBoundingClientRect(); const width = rect.width, height = rect.height;
+    let left = Math.round(anchor.left);
+    if (left + width + gap > vw) left = Math.max(gap, vw - width - gap);
+    if (left < gap) left = gap;
+    let top = Math.round(anchor.topBelow);
+    if (top + height + gap > vh && anchor.topAbove != null) {
+      top = Math.round(anchor.topAbove - height); if (top < gap) top = gap;
+    }
+    if (top + height + gap > vh) top = Math.max(gap, vh - height - gap);
+    dd.style.left = left + 'px'; dd.style.top = top + 'px'; dd.style.visibility = 'visible';
+    ddOpen = true; setActiveIndex(0);
+  }
+  function setActiveIndex(i) {
+    ddIndex = Math.max(0, Math.min(i, ddItems.length - 1));
+    const rows = ddList.querySelectorAll('.row');
+    rows.forEach((r, idx) => r.classList.toggle('active', idx === ddIndex));
+  }
+  function closeDropdown() {
+    ddOpen = false;
+    if (dd) { dd.style.display = 'none'; if (ddList) ddList.innerHTML = ''; }
+    ddItems = []; ddIndex = 0; ddAnchor = null;
+  }
   function updateDropdown(e) {
     if (!emojiEnabled || composing || !emojiLoaded) { closeDropdown(); return; }
     const info = getEditableFromEvent(e); if (!info) { closeDropdown(); return; }
@@ -436,7 +426,7 @@
     const q = qInfo.query.toLowerCase();
     const results = [];
     for (const en of emojiEntries) {
-      if (en.primary.includes(q) || en.names.some(n => n.includes(q)) || en.terms?.some(t => t.includes(q))) results.push(en);
+      if (en.primary.includes(q) || en.names.some(n => n.includes(q)) || en.terms.some(t => t.includes(q))) results.push(en);
     }
     results.sort((a, b) => scoreEntry(q, b) - scoreEntry(q, a));
     renderDropdown(results.slice(0, 12), anchor);
@@ -461,8 +451,6 @@
     }
   }
   function pickActive() { if (!ddOpen || !ddItems.length) return; insertEmojiFromDropdown(ddItems[ddIndex]); closeDropdown(); }
-
-  // Auto-convert :name:
   function onAutoConvert(e) {
     if (!emojiEnabled || composing) return;
     const info = getEditableFromEvent(e); if (!info) return;
@@ -614,6 +602,7 @@
       const style = document.getElementById(cssNodeId(tab.id));
       if (style && style.parentNode) style.parentNode.removeChild(style);
     }
+    // remove all scripts inserted for this tab (cannot undo side-effects)
     document.querySelectorAll(`script[data-delta-from="${tab.id}"]`).forEach(n => n.parentNode && n.parentNode.removeChild(n));
   }
 
@@ -623,6 +612,7 @@
     page.className = 'page';
     page.id = `delta-code-${tab.id}`;
 
+    // Title / mode / autorun
     const metaRow = document.createElement('div');
     metaRow.className = 'row';
 
@@ -647,6 +637,7 @@
     metaRow.appendChild(modeSel);
     metaRow.appendChild(autoLabel);
 
+    // Editor
     const codeWrap = document.createElement('div');
     codeWrap.className = 'code-wrap';
     const ta = document.createElement('textarea');
@@ -655,25 +646,38 @@
     ta.value = tab.code || '';
     codeWrap.appendChild(ta);
 
+    // Actions
     const actions = document.createElement('div'); actions.className = 'row-actions';
     const runBtn = document.createElement('button'); runBtn.className = 'btn'; runBtn.textContent = 'Run now';
     const clearBtn = document.createElement('button'); clearBtn.className = 'btn'; clearBtn.textContent = 'Clear injected';
     const delBtn = document.createElement('button'); delBtn.className = 'btn'; delBtn.textContent = 'Delete tab';
+
     actions.appendChild(runBtn); actions.appendChild(clearBtn); actions.appendChild(delBtn);
 
+    // Status text
     const hint = document.createElement('div');
     hint.className = 'muted';
     hint.textContent = 'JS runs in the page context. CSS stays removable. Clear removes injected nodes (JS side-effects may persist).';
 
+    // Wire up
     const save = () => { saveCodeTabs(); updateCodeTabButton(tab.id); };
-    titleInp.addEventListener('input', () => { tab.title = titleInp.value || 'untitled'; save(); });
-    modeSel.addEventListener('change', () => { tab.mode = modeSel.value === 'css' ? 'css' : 'js'; ta.placeholder = tab.mode === 'css' ? '/* CSS here */' : '// JavaScript here'; save(); });
+    titleInp.addEventListener('input', () => {
+      tab.title = titleInp.value || 'untitled'; save();
+    });
+    modeSel.addEventListener('change', () => {
+      tab.mode = modeSel.value === 'css' ? 'css' : 'js';
+      ta.placeholder = tab.mode === 'css' ? '/* CSS here */' : '// JavaScript here';
+      save();
+    });
     autoCb.addEventListener('change', () => { tab.autoRun = !!autoCb.checked; save(); });
     ta.addEventListener('input', debounce(() => { tab.code = ta.value; save(); }, 200));
 
     runBtn.addEventListener('click', () => injectForTab(tab));
     clearBtn.addEventListener('click', () => clearInjectedForTab(tab));
-    delBtn.addEventListener('click', () => { if (!confirm(`Delete tab "${tab.title || 'untitled'}"?`)) return; deleteCodeTab(tab.id); });
+    delBtn.addEventListener('click', () => {
+      if (!confirm(`Delete tab "${tab.title || 'untitled'}"?`)) return;
+      deleteCodeTab(tab.id);
+    });
 
     page.appendChild(metaRow);
     page.appendChild(codeWrap);
@@ -681,7 +685,10 @@
     page.appendChild(hint);
     return page;
   }
-  function debounce(fn, ms = 200) { let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); }; }
+
+  function debounce(fn, ms = 200) {
+    let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+  }
 
   // Tabs render/update
   function renderCodeTabButtons() {
@@ -695,6 +702,7 @@
       btn.setAttribute('role', 'tab');
       btn.dataset.id = tab.id;
       btn.addEventListener('click', () => switchTab(`code:${tab.id}`));
+      // quick rename via dblclick
       btn.addEventListener('dblclick', () => {
         const name = prompt('Rename tab:', tab.title || 'untitled');
         if (name != null) {
@@ -706,6 +714,7 @@
       tabsLeftCodes.appendChild(btn);
       codeTabButtons.set(tab.id, btn);
     }
+    // Sync aria-selected
     syncTabSelectedState();
   }
   function updateCodeTabButton(id) {
@@ -714,9 +723,11 @@
     if (btn && tab) btn.textContent = tab.title || 'untitled';
   }
   function renderCodePages() {
+    // Remove old pages not in model
     for (const [id, el] of codeTabPages.entries()) {
       if (!codeTabs.some(t => t.id === id)) { el.remove(); codeTabPages.delete(id); }
     }
+    // Add missing pages
     for (const tab of codeTabs) {
       if (!codeTabPages.has(tab.id)) {
         const page = makeCodePage(tab);
@@ -725,6 +736,7 @@
       }
     }
   }
+
   function createNewCodeTab() {
     const id = uid();
     const idx = codeTabs.length + 1;
@@ -734,6 +746,7 @@
     renderCodeTabButtons();
     renderCodePages();
     switchTab(`code:${id}`);
+    // Focus title input
     setTimeout(() => {
       const page = codeTabPages.get(id);
       if (page) {
@@ -742,16 +755,21 @@
       }
     }, 50);
   }
+
   function deleteCodeTab(id) {
     const i = codeTabs.findIndex(t => t.id === id);
     if (i >= 0) codeTabs.splice(i, 1);
     saveCodeTabs();
-    clearInjectedForTab({ id, mode: 'js' });
-    clearInjectedForTab({ id, mode: 'css' });
+    // Remove injected nodes for safety
+    clearInjectedForTab({ id, mode: 'js' }); // clears JS scripts
+    clearInjectedForTab({ id, mode: 'css' }); // clears CSS style
+    // Remove UI
     const btn = codeTabButtons.get(id); if (btn) btn.remove(); codeTabButtons.delete(id);
     const page = codeTabPages.get(id); if (page) page.remove(); codeTabPages.delete(id);
+    // Switch back to visual
     switchTab('visual');
   }
+
   function syncTabSelectedState() {
     const target = activeTabKey;
     const isVisual = target === 'visual';
@@ -766,12 +784,15 @@
       btn.tabIndex = on ? 0 : -1;
     }
   }
+
   function switchTab(key) {
     activeTabKey = key.startsWith('code:') || key === 'snapshots' ? key : 'visual';
     localStorage.setItem(LS_TAB, activeTabKey);
+    // Show/hide pages
     pageVisual.classList.toggle('active', activeTabKey === 'visual');
     pageShots.classList.toggle('active', activeTabKey === 'snapshots');
     for (const [id, el] of codeTabPages.entries()) el.classList.toggle('active', activeTabKey === `code:${id}`);
+    // Aria on tabs
     syncTabSelectedState();
   }
 
@@ -789,7 +810,7 @@
     // Tabs bar
     const tabsBar = document.createElement('div'); tabsBar.className = 'tabs'; tabsBar.setAttribute('role', 'tablist');
 
-    tabsLeft = document.createElement('div'); tabsLeft.className = 'tabs-left';
+    const tabsLeft = document.createElement('div'); tabsLeft.className = 'tabs-left';
     tabsLeftBase = document.createElement('div'); tabsLeftBase.className = 'tabs-left-base';
     tabsLeftCodes = document.createElement('div'); tabsLeftCodes.className = 'tabs-left-codes';
 
@@ -802,7 +823,8 @@
 
     const tabsRightWrap = document.createElement('div'); tabsRightWrap.className = 'tabs-right';
     plusBtn = document.createElement('button'); plusBtn.type = 'button'; plusBtn.className = 'tab plus'; plusBtn.textContent = '+';
-    plusBtn.title = 'New code tab'; plusBtn.addEventListener('click', createNewCodeTab);
+    plusBtn.title = 'New code tab';
+    plusBtn.addEventListener('click', createNewCodeTab);
     tabsRightWrap.appendChild(plusBtn);
 
     tabsBar.appendChild(tabsLeft);
